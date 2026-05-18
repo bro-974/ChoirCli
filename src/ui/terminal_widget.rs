@@ -51,13 +51,13 @@ impl<'a> canvas::Program<Message> for TerminalWidget<'a> {
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
-        let bytes = match event {
+        let msg = match event {
             canvas::Event::Keyboard(key_event) => map_key_event(key_event),
             _ => return (canvas::event::Status::Ignored, None),
         };
 
-        match bytes {
-            Some(b) => (canvas::event::Status::Captured, Some(Message::KeyInput(b))),
+        match msg {
+            Some(m) => (canvas::event::Status::Captured, Some(m)),
             None => (canvas::event::Status::Ignored, None),
         }
     }
@@ -113,49 +113,53 @@ fn rgb_to_iced(rgb: Rgb) -> iced::Color {
     iced::Color::from_rgb8(rgb.r, rgb.g, rgb.b)
 }
 
-fn map_key_event(event: iced::keyboard::Event) -> Option<Vec<u8>> {
-    use iced::keyboard::{Event, Key, key::Named};
+fn map_key_input(key: &iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> Option<Message> {
+    use iced::keyboard::{Key, key::Named};
 
-    match event {
-        Event::KeyPressed { key, modifiers, .. } => {
-            if modifiers.control() {
-                if let Key::Character(s) = &key {
-                    let c = s.chars().next()?;
-                    let byte = match c {
-                        'c' | 'C' => 0x03u8,
-                        'd' | 'D' => 0x04,
-                        'z' | 'Z' => 0x1A,
-                        'l' | 'L' => 0x0C,
-                        'a' | 'A' => 0x01,
-                        'e' | 'E' => 0x05,
-                        'u' | 'U' => 0x15,
-                        'k' | 'K' => 0x0B,
-                        'w' | 'W' => 0x17,
-                        _ => return None,
-                    };
-                    return Some(vec![byte]);
-                }
-            }
-
-            match key {
-                Key::Character(s) => Some(s.as_bytes().to_vec()),
-                Key::Named(Named::Enter) => Some(b"\r".to_vec()),
-                Key::Named(Named::Backspace) => Some(vec![0x7F]),
-                Key::Named(Named::Tab) => Some(b"\t".to_vec()),
-                Key::Named(Named::Escape) => Some(vec![0x1B]),
-                Key::Named(Named::Space) => Some(b" ".to_vec()),
-                Key::Named(Named::ArrowUp) => Some(b"\x1b[A".to_vec()),
-                Key::Named(Named::ArrowDown) => Some(b"\x1b[B".to_vec()),
-                Key::Named(Named::ArrowRight) => Some(b"\x1b[C".to_vec()),
-                Key::Named(Named::ArrowLeft) => Some(b"\x1b[D".to_vec()),
-                Key::Named(Named::Home) => Some(b"\x1b[H".to_vec()),
-                Key::Named(Named::End) => Some(b"\x1b[F".to_vec()),
-                Key::Named(Named::Delete) => Some(b"\x1b[3~".to_vec()),
-                Key::Named(Named::PageUp) => Some(b"\x1b[5~".to_vec()),
-                Key::Named(Named::PageDown) => Some(b"\x1b[6~".to_vec()),
-                _ => None,
-            }
+    if modifiers.control() {
+        if let Key::Character(s) = key {
+            let c = s.chars().next()?;
+            let msg = match c {
+                'c' | 'C' => Message::KeyInput(vec![0x03u8]),
+                'd' | 'D' => Message::KeyInput(vec![0x04]),
+                'z' | 'Z' => Message::KeyInput(vec![0x1A]),
+                'l' | 'L' => Message::KeyInput(vec![0x0C]),
+                'a' | 'A' => Message::KeyInput(vec![0x01]),
+                'e' | 'E' => Message::KeyInput(vec![0x05]),
+                'u' | 'U' => Message::KeyInput(vec![0x15]),
+                'k' | 'K' => Message::KeyInput(vec![0x0B]),
+                'w' | 'W' => Message::KeyInput(vec![0x17]),
+                'v' | 'V' => Message::PasteFromClipboard,
+                _ => return None,
+            };
+            return Some(msg);
         }
+    }
+
+    match key {
+        Key::Character(s) => Some(Message::KeyInput(s.as_bytes().to_vec())),
+        Key::Named(Named::Enter) => Some(Message::KeyInput(b"\r".to_vec())),
+        Key::Named(Named::Backspace) => Some(Message::KeyInput(vec![0x7F])),
+        Key::Named(Named::Tab) => Some(Message::KeyInput(b"\t".to_vec())),
+        Key::Named(Named::Escape) => Some(Message::KeyInput(vec![0x1B])),
+        Key::Named(Named::Space) => Some(Message::KeyInput(b" ".to_vec())),
+        Key::Named(Named::ArrowUp) => Some(Message::KeyInput(b"\x1b[A".to_vec())),
+        Key::Named(Named::ArrowDown) => Some(Message::KeyInput(b"\x1b[B".to_vec())),
+        Key::Named(Named::ArrowRight) => Some(Message::KeyInput(b"\x1b[C".to_vec())),
+        Key::Named(Named::ArrowLeft) => Some(Message::KeyInput(b"\x1b[D".to_vec())),
+        Key::Named(Named::Home) => Some(Message::KeyInput(b"\x1b[H".to_vec())),
+        Key::Named(Named::End) => Some(Message::KeyInput(b"\x1b[F".to_vec())),
+        Key::Named(Named::Delete) => Some(Message::KeyInput(b"\x1b[3~".to_vec())),
+        Key::Named(Named::PageUp) => Some(Message::KeyInput(b"\x1b[5~".to_vec())),
+        Key::Named(Named::PageDown) => Some(Message::KeyInput(b"\x1b[6~".to_vec())),
+        _ => None,
+    }
+}
+
+fn map_key_event(event: iced::keyboard::Event) -> Option<Message> {
+    use iced::keyboard::Event;
+    match event {
+        Event::KeyPressed { key, modifiers, .. } => map_key_input(&key, modifiers),
         _ => None,
     }
 }
@@ -249,5 +253,26 @@ mod tests {
     fn extract_multi_line_partial() {
         let grid = vec![make_row("Hello"), make_row("World")];
         assert_eq!(extract_text(&grid, (0, 2), (1, 2)), "llo\nWor");
+    }
+
+    #[test]
+    fn ctrl_v_produces_paste_message() {
+        use iced::keyboard::{Key, Modifiers};
+        let result = map_key_input(&Key::Character("v".into()), Modifiers::CTRL);
+        assert!(matches!(result, Some(Message::PasteFromClipboard)));
+    }
+
+    #[test]
+    fn ctrl_c_produces_sigint() {
+        use iced::keyboard::{Key, Modifiers};
+        let result = map_key_input(&Key::Character("c".into()), Modifiers::CTRL);
+        assert!(matches!(result, Some(Message::KeyInput(ref b)) if *b == vec![0x03u8]));
+    }
+
+    #[test]
+    fn ctrl_d_produces_eof() {
+        use iced::keyboard::{Key, Modifiers};
+        let result = map_key_input(&Key::Character("d".into()), Modifiers::CTRL);
+        assert!(matches!(result, Some(Message::KeyInput(ref b)) if *b == vec![0x04u8]));
     }
 }
