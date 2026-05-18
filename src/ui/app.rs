@@ -19,6 +19,9 @@ pub enum Message {
     PtyTick,
     KeyInput(Vec<u8>),
     WindowResized(u32, u32),
+    CopyToClipboard(String),
+    PasteFromClipboard,
+    PasteText(String),
 }
 
 impl App {
@@ -51,6 +54,16 @@ impl App {
                     self.emulator.resize(cols, rows);
                     self.pty.resize(cols as u16, rows as u16);
                 }
+            }
+            Message::CopyToClipboard(text) => {
+                return iced::clipboard::write(text).map(|_: ()| Message::PtyTick);
+            }
+            Message::PasteFromClipboard => {
+                return iced::clipboard::read()
+                    .map(|opt| Message::PasteText(opt.unwrap_or_default()));
+            }
+            Message::PasteText(text) => {
+                let _ = self.pty.write_bytes(text.as_bytes());
             }
         }
         Task::none()
