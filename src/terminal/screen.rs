@@ -108,8 +108,33 @@ impl TerminalEmulator {
 }
 
 impl vte::Perform for TerminalScreen {
-    fn print(&mut self, _c: char) {}
-    fn execute(&mut self, _byte: u8) {}
+    fn print(&mut self, c: char) {
+        if self.cursor_col >= self.cols {
+            self.cursor_col = 0;
+            self.newline();
+        }
+        let mut cell = self.current_cell();
+        cell.ch = c;
+        self.grid[self.cursor_row][self.cursor_col] = cell;
+        self.cursor_col += 1;
+    }
+
+    fn execute(&mut self, byte: u8) {
+        match byte {
+            b'\n' | b'\x0B' | b'\x0C' => {
+                self.newline();
+                self.cursor_col = 0;
+            }
+            b'\r' => self.cursor_col = 0,
+            b'\x08' => {
+                if self.cursor_col > 0 {
+                    self.cursor_col -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn csi_dispatch(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {}
     fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {}
     fn put(&mut self, _byte: u8) {}
@@ -121,6 +146,10 @@ impl vte::Perform for TerminalScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make(cols: usize, rows: usize) -> TerminalEmulator {
+        TerminalEmulator::new(cols, rows)
+    }
 
     #[test]
     fn grid_initializes_with_default_cells() {
@@ -155,5 +184,50 @@ mod tests {
         screen.grid[0][0].ch = 'X';
         screen.resize(5, 5);
         assert_eq!(screen.grid[0][0].ch, 'X');
+    }
+
+    #[test]
+    fn print_writes_char_at_cursor_and_advances() {
+        let mut em = make(10, 5);
+        em.process(b"A");
+        assert_eq!(em.screen.grid[0][0].ch, 'A');
+        assert_eq!(em.screen.cursor_col, 1);
+        assert_eq!(em.screen.cursor_row, 0);
+    }
+
+    #[test]
+    fn carriage_return_moves_cursor_to_col_zero() {
+        let mut em = make(10, 5);
+        em.process(b"ABC\r");
+        assert_eq!(em.screen.cursor_col, 0);
+        assert_eq!(em.screen.cursor_row, 0);
+        assert_eq!(em.screen.grid[0][0].ch, 'A');
+    }
+
+    #[test]
+    fn newline_moves_cursor_down() {
+        let mut em = make(10, 5);
+        em.process(b"A\nB");
+        assert_eq!(em.screen.grid[0][0].ch, 'A');
+        assert_eq!(em.screen.grid[1][0].ch, 'B');
+    }
+
+    #[test]
+    fn scroll_when_cursor_exceeds_last_row() {
+        let mut em = make(10, 3);
+        em.process(b"A\nB\nC\nD");
+        assert_eq!(em.screen.grid[0][0].ch, 'B');
+        assert_eq!(em.screen.grid[1][0].ch, 'C');
+        assert_eq!(em.screen.grid[2][0].ch, 'D');
+    }
+
+    #[test]
+    fn print_wraps_at_end_of_line() {
+        let mut em = make(3, 5);
+        em.process(b"ABCD");
+        assert_eq!(em.screen.grid[0][0].ch, 'A');
+        assert_eq!(em.screen.grid[0][1].ch, 'B');
+        assert_eq!(em.screen.grid[0][2].ch, 'C');
+        assert_eq!(em.screen.grid[1][0].ch, 'D');
     }
 }
