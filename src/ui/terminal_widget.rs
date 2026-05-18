@@ -42,23 +42,59 @@ impl<'a> TerminalWidget<'a> {
 }
 
 impl<'a> canvas::Program<Message> for TerminalWidget<'a> {
-    type State = ();
+    type State = SelectionState;
 
     fn update(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         event: canvas::Event,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
-        let msg = match event {
-            canvas::Event::Keyboard(key_event) => map_key_event(key_event),
-            _ => return (canvas::event::Status::Ignored, None),
-        };
-
-        match msg {
-            Some(m) => (canvas::event::Status::Captured, Some(m)),
-            None => (canvas::event::Status::Ignored, None),
+        match event {
+            canvas::Event::Keyboard(key_event) => {
+                match map_key_event(key_event) {
+                    Some(m) => (canvas::event::Status::Captured, Some(m)),
+                    None => (canvas::event::Status::Ignored, None),
+                }
+            }
+            canvas::Event::Mouse(mouse_event) => {
+                use iced::mouse::Event as ME;
+                match mouse_event {
+                    ME::ButtonPressed(mouse::Button::Left) => {
+                        if let Some(pos) = cursor.position_in(bounds) {
+                            let cell = pixel_to_cell(pos, self.screen.rows, self.screen.cols);
+                            state.start = Some(cell);
+                            state.end = Some(cell);
+                            state.is_selecting = true;
+                        }
+                        (canvas::event::Status::Captured, None)
+                    }
+                    ME::CursorMoved { .. } => {
+                        if state.is_selecting {
+                            if let Some(pos) = cursor.position_in(bounds) {
+                                state.end = Some(pixel_to_cell(pos, self.screen.rows, self.screen.cols));
+                            }
+                        }
+                        (canvas::event::Status::Ignored, None)
+                    }
+                    ME::ButtonReleased(mouse::Button::Left) => {
+                        state.is_selecting = false;
+                        (canvas::event::Status::Captured, None)
+                    }
+                    ME::ButtonPressed(mouse::Button::Right) => {
+                        if let Some((start, end)) = state.normalized() {
+                            let text = extract_text(&self.screen.grid, start, end);
+                            *state = SelectionState::default();
+                            (canvas::event::Status::Captured, Some(Message::CopyToClipboard(text)))
+                        } else {
+                            (canvas::event::Status::Ignored, None)
+                        }
+                    }
+                    _ => (canvas::event::Status::Ignored, None),
+                }
+            }
+            _ => (canvas::event::Status::Ignored, None),
         }
     }
 
@@ -162,6 +198,12 @@ fn map_key_event(event: iced::keyboard::Event) -> Option<Message> {
         Event::KeyPressed { key, modifiers, .. } => map_key_input(&key, modifiers),
         _ => None,
     }
+}
+
+fn pixel_to_cell(pos: iced::Point, rows: usize, cols: usize) -> (usize, usize) {
+    let row = (pos.y / TerminalWidget::CHAR_HEIGHT) as usize;
+    let col = (pos.x / TerminalWidget::CHAR_WIDTH) as usize;
+    (row.min(rows.saturating_sub(1)), col.min(cols.saturating_sub(1)))
 }
 
 fn extract_text(grid: &[Vec<crate::terminal::screen::Cell>], start: (usize, usize), end: (usize, usize)) -> String {
