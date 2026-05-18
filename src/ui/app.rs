@@ -56,7 +56,7 @@ impl App {
         Task::none()
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         TerminalWidget::new(&self.emulator.screen).into()
     }
 

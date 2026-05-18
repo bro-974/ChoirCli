@@ -5,6 +5,7 @@ use std::sync::mpsc;
 pub struct PtyHandle {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
+    #[allow(dead_code)] // kept alive to prevent premature shell exit
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
