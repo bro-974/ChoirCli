@@ -100,7 +100,7 @@ impl<'a> canvas::Program<Message> for TerminalWidget<'a> {
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &iced::Renderer,
         _theme: &iced::Theme,
         bounds: Rectangle,
@@ -112,6 +112,19 @@ impl<'a> canvas::Program<Message> for TerminalWidget<'a> {
 
         let cw = Self::CHAR_WIDTH;
         let ch = Self::CHAR_HEIGHT;
+
+        if let Some(((r1, c1), (r2, c2))) = state.normalized() {
+            let highlight = iced::Color { r: 0.39, g: 0.59, b: 1.0, a: 0.4 };
+            for row in r1..=r2 {
+                if row >= self.screen.rows { break; }
+                let col_start = if row == r1 { c1 } else { 0 };
+                let col_end = if row == r2 { c2 } else { self.screen.cols.saturating_sub(1) };
+                let x = col_start as f32 * cw;
+                let y = row as f32 * ch;
+                let w = (col_end - col_start + 1) as f32 * cw;
+                frame.fill_rectangle(Point::new(x, y), Size::new(w, ch), highlight);
+            }
+        }
 
         for (row_idx, row) in self.screen.grid.iter().enumerate() {
             for (col_idx, cell) in row.iter().enumerate() {
