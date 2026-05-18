@@ -160,6 +160,31 @@ fn map_key_event(event: iced::keyboard::Event) -> Option<Vec<u8>> {
     }
 }
 
+fn extract_text(grid: &[Vec<crate::terminal::screen::Cell>], start: (usize, usize), end: (usize, usize)) -> String {
+    let (r1, c1) = start;
+    let (r2, c2) = end;
+    let mut lines = Vec::new();
+
+    for row in r1..=r2 {
+        if row >= grid.len() { break; }
+        let row_len = grid[row].len();
+        if row_len == 0 {
+            lines.push(String::new());
+            continue;
+        }
+        let col_start = if row == r1 { c1 } else { 0 }.min(row_len - 1);
+        let col_end = if row == r2 { c2 } else { row_len - 1 }.min(row_len - 1);
+        let line: String = grid[row][col_start..=col_end]
+            .iter()
+            .map(|c| c.ch)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        lines.push(line);
+    }
+    lines.join("\n")
+}
+
 impl<'a> From<TerminalWidget<'a>> for Element<'a, Message> {
     fn from(w: TerminalWidget<'a>) -> Self {
         Canvas::new(w)
@@ -195,5 +220,34 @@ mod tests {
     fn normalized_no_selection() {
         let s = SelectionState::default();
         assert_eq!(s.normalized(), None);
+    }
+
+    fn make_row(s: &str) -> Vec<crate::terminal::screen::Cell> {
+        use crate::terminal::screen::{Cell, Rgb};
+        s.chars().map(|ch| Cell { ch, fg: Rgb::WHITE, bg: Rgb::BLACK, bold: false, underline: false }).collect()
+    }
+
+    #[test]
+    fn extract_single_line() {
+        let grid = vec![make_row("Hello World")];
+        assert_eq!(extract_text(&grid, (0, 0), (0, 4)), "Hello");
+    }
+
+    #[test]
+    fn extract_trims_trailing_spaces() {
+        let grid = vec![make_row("Hi   ")];
+        assert_eq!(extract_text(&grid, (0, 0), (0, 4)), "Hi");
+    }
+
+    #[test]
+    fn extract_multi_line() {
+        let grid = vec![make_row("Hello"), make_row("World")];
+        assert_eq!(extract_text(&grid, (0, 0), (1, 4)), "Hello\nWorld");
+    }
+
+    #[test]
+    fn extract_multi_line_partial() {
+        let grid = vec![make_row("Hello"), make_row("World")];
+        assert_eq!(extract_text(&grid, (0, 2), (1, 2)), "llo\nWor");
     }
 }
