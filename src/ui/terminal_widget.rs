@@ -9,6 +9,25 @@ use crate::ui::app::Message;
 const FONT_SIZE: f32 = 14.0;
 const NERD_FONT: iced::Font = iced::Font::with_name("JetBrainsMono Nerd Font");
 
+#[derive(Default, Clone, Copy)]
+pub struct SelectionState {
+    pub start: Option<(usize, usize)>,
+    pub end:   Option<(usize, usize)>,
+    pub is_selecting: bool,
+}
+
+impl SelectionState {
+    /// Returns (top_left, bottom_right) in grid coordinates, or None if no selection.
+    pub fn normalized(&self) -> Option<((usize, usize), (usize, usize))> {
+        match (self.start, self.end) {
+            (Some(s), Some(e)) => {
+                if s <= e { Some((s, e)) } else { Some((e, s)) }
+            }
+            _ => None,
+        }
+    }
+}
+
 pub struct TerminalWidget<'a> {
     screen: &'a TerminalScreen,
 }
@@ -147,5 +166,34 @@ impl<'a> From<TerminalWidget<'a>> for Element<'a, Message> {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalized_forward_selection() {
+        let s = SelectionState { start: Some((1, 3)), end: Some((2, 5)), is_selecting: false };
+        assert_eq!(s.normalized(), Some(((1, 3), (2, 5))));
+    }
+
+    #[test]
+    fn normalized_backward_selection() {
+        let s = SelectionState { start: Some((2, 5)), end: Some((1, 3)), is_selecting: false };
+        assert_eq!(s.normalized(), Some(((1, 3), (2, 5))));
+    }
+
+    #[test]
+    fn normalized_same_cell() {
+        let s = SelectionState { start: Some((0, 0)), end: Some((0, 0)), is_selecting: false };
+        assert_eq!(s.normalized(), Some(((0, 0), (0, 0))));
+    }
+
+    #[test]
+    fn normalized_no_selection() {
+        let s = SelectionState::default();
+        assert_eq!(s.normalized(), None);
     }
 }
