@@ -1,3 +1,6 @@
+mod terminal;
+mod ui;
+
 fn main() {
-    println!("Hello, world!");
+    println!("placeholder");
 }
