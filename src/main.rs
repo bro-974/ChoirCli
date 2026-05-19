@@ -1,4 +1,5 @@
 mod terminal;
+mod db;
 mod ui;
 
 use ui::app::App;
