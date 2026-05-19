@@ -68,10 +68,10 @@ impl AgentPool {
             if let Some(ref sid) = instance.last_session_id {
                 vec![template.resume_arg.clone(), sid.clone()]
             } else {
-                resolve_args(&template.base_args, "")
+                resolve_args(&template.base_args, &instance.custom_name)
             }
         } else {
-            resolve_args(&template.base_args, "")
+            resolve_args(&template.base_args, &instance.custom_name)
         };
 
         let id = uuid::Uuid::new_v4().to_string();
