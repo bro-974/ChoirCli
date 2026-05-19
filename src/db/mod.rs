@@ -158,11 +158,11 @@ impl Db {
         .collect()
     }
 
-    fn unique_custom_name(&self, base: &str) -> String {
+    fn unique_custom_name(&self, project_id: &str, base: &str) -> String {
         let exists = |name: &str| -> bool {
             self.conn.query_row(
-                "SELECT COUNT(*) FROM project_instances WHERE custom_name = ?1",
-                params![name],
+                "SELECT COUNT(*) FROM project_instances WHERE custom_name = ?1 AND project_id = ?2",
+                params![name, project_id],
                 |r| r.get::<_, i64>(0),
             ).unwrap_or(0) > 0
         };
@@ -184,7 +184,7 @@ impl Db {
             template.name,
             chrono::Local::now().format("%Hh%M")
         );
-        let custom_name = self.unique_custom_name(&base);
+        let custom_name = self.unique_custom_name(project_id, &base);
         self.conn.execute(
             "INSERT INTO project_instances
              (id, project_id, template_id, custom_name, last_session_id)
@@ -208,7 +208,8 @@ impl Db {
                 at.id, at.name, at.cli_command, at.base_args, at.default_prompt, at.resume_arg
              FROM project_instances pi
              JOIN projects p ON pi.project_id = p.id
-             JOIN agent_templates at ON pi.template_id = at.id"
+             JOIN agent_templates at ON pi.template_id = at.id
+             ORDER BY pi.custom_name"
         ).unwrap();
         stmt.query_map([], |r| {
             let inst = AgentInstance {
