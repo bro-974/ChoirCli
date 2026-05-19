@@ -75,7 +75,7 @@ impl Db {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM agent_templates", [], |r| r.get(0))?;
         if count == 0 {
-            let args = json_encode(&["-f", "{context_file}", "-n", "Main"]);
+            let args = json_encode(&["-n", "Main"]);
             conn.execute(
                 "INSERT INTO agent_templates (id, name, cli_command, base_args, default_prompt)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].id, "claude-main");
         assert_eq!(t[0].cli_command, "claude");
-        assert_eq!(t[0].base_args, vec!["-f", "{context_file}", "-n", "Main"]);
+        assert_eq!(t[0].base_args, vec!["-n", "Main"]);
     }
 
     #[test]
