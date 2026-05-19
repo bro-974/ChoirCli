@@ -15,6 +15,7 @@ pub struct AgentTemplate {
     pub cli_command: String,
     pub base_args: Vec<String>,
     pub default_prompt: String,
+    pub resume_arg: String,
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +68,12 @@ impl Db {
                 last_session_id TEXT
             );",
         )?;
+        // Idempotent — silently ignored if column already exists
+        conn.execute_batch(
+            "ALTER TABLE agent_templates ADD COLUMN resume_arg TEXT NOT NULL DEFAULT '';"
+        ).ok();
         Self::seed_templates(conn)?;
+        Self::migrate_templates(conn)?;
         Ok(())
     }
 
@@ -75,13 +81,31 @@ impl Db {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM agent_templates", [], |r| r.get(0))?;
         if count == 0 {
-            let args = json_encode(&["-n", "Main"]);
+            let args = json_encode(&["-n", "{session_name}"]);
             conn.execute(
-                "INSERT INTO agent_templates (id, name, cli_command, base_args, default_prompt)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params!["claude-main", "Claude Main", "claude", args, ""],
+                "INSERT INTO agent_templates
+                 (id, name, cli_command, base_args, default_prompt, resume_arg)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params!["claude-main", "Claude Main", "claude", args, "", "--resume"],
             )?;
         }
+        Ok(())
+    }
+
+    fn migrate_templates(conn: &Connection) -> Result<()> {
+        conn.execute(
+            "UPDATE agent_templates SET resume_arg = '--resume'
+             WHERE id = 'claude-main' AND resume_arg = ''",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE agent_templates SET base_args = ?1
+             WHERE id = 'claude-main' AND base_args = ?2",
+            params![
+                json_encode(&["-n", "{session_name}"]),
+                json_encode(&["-n", "Main"]),
+            ],
+        )?;
         Ok(())
     }
 
@@ -112,7 +136,10 @@ impl Db {
 
     pub fn list_templates(&self) -> Vec<AgentTemplate> {
         let mut stmt = self.conn
-            .prepare("SELECT id, name, cli_command, base_args, default_prompt FROM agent_templates")
+            .prepare(
+                "SELECT id, name, cli_command, base_args, default_prompt, resume_arg
+                 FROM agent_templates"
+            )
             .unwrap();
         stmt.query_map([], |r| {
             let args_json: String = r.get(3)?;
@@ -122,6 +149,7 @@ impl Db {
                 cli_command: r.get(2)?,
                 base_args: json_decode(&args_json),
                 default_prompt: r.get(4)?,
+                resume_arg: r.get(5)?,
             })
         })
         .unwrap()
@@ -183,7 +211,7 @@ mod tests {
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].id, "claude-main");
         assert_eq!(t[0].cli_command, "claude");
-        assert_eq!(t[0].base_args, vec!["-n", "Main"]);
+        assert_eq!(t[0].base_args, vec!["-n", "{session_name}"]);
     }
 
     #[test]
@@ -226,5 +254,36 @@ mod tests {
         let enc = json_encode(&["-f", "/tmp/file.md", "-n", "Main"]);
         let dec = json_decode(&enc);
         assert_eq!(dec, vec!["-f", "/tmp/file.md", "-n", "Main"]);
+    }
+
+    #[test]
+    fn seeded_template_has_resume_arg() {
+        let db = mem();
+        let t = db.list_templates();
+        assert_eq!(t[0].resume_arg, "--resume");
+    }
+
+    #[test]
+    fn migration_sets_resume_arg_on_existing_row() {
+        let db = mem();
+        db.conn.execute(
+            "UPDATE agent_templates SET resume_arg = '' WHERE id = 'claude-main'",
+            [],
+        ).unwrap();
+        Db::migrate_templates(&db.conn).unwrap();
+        let t = db.list_templates();
+        assert_eq!(t[0].resume_arg, "--resume");
+    }
+
+    #[test]
+    fn migration_updates_base_args_from_hardcoded_main() {
+        let db = mem();
+        db.conn.execute(
+            "UPDATE agent_templates SET base_args = ?1 WHERE id = 'claude-main'",
+            rusqlite::params![super::json_encode(&["-n", "Main"])],
+        ).unwrap();
+        Db::migrate_templates(&db.conn).unwrap();
+        let t = db.list_templates();
+        assert_eq!(t[0].base_args, vec!["-n", "{session_name}"]);
     }
 }

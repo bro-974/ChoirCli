@@ -130,6 +130,7 @@ mod tests {
             cli_command: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
             base_args: vec![],
             default_prompt: "".to_string(),
+            resume_arg: String::new(),
         };
         pool.spawn(&project, &template, 80, 24);
         assert_eq!(pool.agents.len(), 1);
@@ -154,6 +155,7 @@ mod tests {
             cli_command: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
             base_args: vec![],
             default_prompt: "".to_string(),
+            resume_arg: String::new(),
         };
         pool.spawn(&project, &template, 80, 24);
         pool.spawn(&project, &template, 80, 24);
