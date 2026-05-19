@@ -5,6 +5,7 @@ use iced::widget::container;
 use crate::db::{Db, Project, AgentTemplate};
 use crate::agents::AgentPool;
 use crate::ui::terminal_widget::TerminalWidget;
+use crate::ui::sidebar::view_sidebar;
 
 pub struct App {
     pub db: Db,
@@ -123,8 +124,7 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        // Sidebar is wired in Task 6 after sidebar.rs is created
-        match self.pool.focused() {
+        let workspace: Element<Message> = match self.pool.focused() {
             Some(agent) => TerminalWidget::new(&agent.emulator.screen).into(),
             None => container(iced::widget::text("Sélectionne un agent").size(14))
                 .width(Length::Fill)
@@ -132,7 +132,18 @@ impl App {
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center)
                 .into(),
-        }
+        };
+
+        iced::widget::row![
+            view_sidebar(
+                &self.projects,
+                &self.pool.agents,
+                &self.templates,
+                &self.sidebar_expanded_project,
+            ),
+            workspace,
+        ]
+        .into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
