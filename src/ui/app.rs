@@ -60,7 +60,9 @@ impl App {
             }
             Message::PasteFromClipboard => {
                 return iced::clipboard::read()
-                    .map(|opt| Message::PasteText(opt.unwrap_or_default()));
+                    .map(|opt| {
+                        Message::PasteText(opt.unwrap_or_default())
+                    });
             }
             Message::PasteText(text) => {
                 let _ = self.pty.write_bytes(text.as_bytes());
@@ -78,10 +80,11 @@ impl App {
             .map(|_| Message::PtyTick);
 
         let resize = iced::event::listen_with(|event, _status, _id| {
-            if let iced::Event::Window(iced::window::Event::Resized(size)) = event {
-                Some(Message::WindowResized(size.width as u32, size.height as u32))
-            } else {
-                None
+            match event {
+                iced::Event::Window(iced::window::Event::Resized(size)) => {
+                    Some(Message::WindowResized(size.width as u32, size.height as u32))
+                }
+                _ => None,
             }
         });
 
