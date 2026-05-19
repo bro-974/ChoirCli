@@ -30,6 +30,7 @@ pub enum Message {
     ToggleTemplateMenu(String),
     SpawnAgent { project_id: String, template_id: String },
     FocusAgent(String),
+    CloseAgent(String),  // agent_id
 }
 
 impl App {
@@ -37,9 +38,16 @@ impl App {
         let db = Db::open().expect("failed to open database");
         let projects = db.list_projects();
         let templates = db.list_templates();
+        let mut pool = AgentPool::new();
+
+        let instances = db.list_instances_with_context();
+        for (instance, project, template) in &instances {
+            pool.restore(project, template, instance, 80, 24);
+        }
+
         let app = App {
             db,
-            pool: AgentPool::new(),
+            pool,
             projects,
             templates,
             sidebar_expanded_project: None,
@@ -123,6 +131,11 @@ impl App {
             }
             Message::FocusAgent(agent_id) => {
                 self.pool.focus(&agent_id);
+            }
+            Message::CloseAgent(agent_id) => {
+                if let Some(instance_id) = self.pool.close(&agent_id) {
+                    self.db.delete_instance(&instance_id);
+                }
             }
         }
         Task::none()
