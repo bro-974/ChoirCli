@@ -138,7 +138,7 @@ impl Db {
         let mut stmt = self.conn
             .prepare(
                 "SELECT id, name, cli_command, base_args, default_prompt, resume_arg
-                 FROM agent_templates"
+                 FROM agent_templates ORDER BY name"
             )
             .unwrap();
         stmt.query_map([], |r| {
@@ -185,10 +185,36 @@ fn json_encode(items: &[&str]) -> String {
 fn json_decode(s: &str) -> Vec<String> {
     let inner = s.trim().trim_start_matches('[').trim_end_matches(']');
     if inner.is_empty() { return vec![]; }
-    inner.split(',')
-        .map(|tok| tok.trim().trim_matches('"')
-             .replace("\\\"", "\"").replace("\\\\", "\\"))
-        .collect()
+
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = inner.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if !in_quotes => { in_quotes = true; }
+            '"' if in_quotes => { in_quotes = false; }
+            '\\' if in_quotes => {
+                if let Some(next) = chars.next() {
+                    match next {
+                        '"' => current.push('"'),
+                        '\\' => current.push('\\'),
+                        other => { current.push('\\'); current.push(other); }
+                    }
+                }
+            }
+            ',' if !in_quotes => {
+                result.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => { if in_quotes { current.push(ch); } }
+        }
+    }
+    if !current.trim().is_empty() || in_quotes {
+        result.push(current.trim().to_string());
+    }
+    result
 }
 
 #[cfg(test)]
@@ -254,6 +280,13 @@ mod tests {
         let enc = json_encode(&["-f", "/tmp/file.md", "-n", "Main"]);
         let dec = json_decode(&enc);
         assert_eq!(dec, vec!["-f", "/tmp/file.md", "-n", "Main"]);
+    }
+
+    #[test]
+    fn json_roundtrip_with_comma() {
+        let enc = json_encode(&["--flag=a,b", "normal"]);
+        let dec = json_decode(&enc);
+        assert_eq!(dec, vec!["--flag=a,b", "normal"]);
     }
 
     #[test]
