@@ -111,8 +111,13 @@ impl App {
                     self.projects.iter().find(|p| p.id == project_id).cloned(),
                     self.templates.iter().find(|t| t.id == template_id).cloned(),
                 ) {
-                    self.db.insert_instance(&project_id, &template);
-                    self.pool.spawn(&project, &template, self.terminal_cols, self.terminal_rows);
+                    let instance = self.db.insert_instance(&project_id, &template);
+                    let session_name = instance.custom_name.clone();
+                    let instance_id = instance.id.clone();
+                    self.pool.spawn(
+                        &project, &template, &instance_id, &session_name,
+                        self.terminal_cols, self.terminal_rows,
+                    );
                     self.sidebar_expanded_project = None;
                 }
             }
