@@ -44,12 +44,17 @@ pub fn view_sidebar<'a>(
         }
 
         for agent in agents.iter().filter(|a| a.project_id == project.id) {
-            col = col.push(
+            let agent_row = iced::widget::row![
                 button(text(format!("🤖 {} ({})", agent.template_name, agent.spawned_at)).size(12))
                     .on_press(Message::FocusAgent(agent.id.clone()))
                     .width(Length::Fill)
                     .padding([2, 16]),
-            );
+                button(text("×").size(12))
+                    .on_press(Message::CloseAgent(agent.id.clone()))
+                    .padding([2, 4]),
+            ]
+            .align_y(iced::alignment::Vertical::Center);
+            col = col.push(agent_row);
         }
     }
 
