@@ -1,17 +1,19 @@
-use std::sync::{Arc, Mutex, mpsc};
-use std::time::Duration;
-use iced::{Element, Task, Subscription};
+use std::path::PathBuf;
+use iced::{Element, Task, Subscription, Length};
+use iced::widget::container;
 
-use crate::terminal::{PtyHandle, TerminalEmulator, spawn_pty};
+use crate::db::{Db, Project, AgentTemplate};
+use crate::agents::AgentPool;
 use crate::ui::terminal_widget::TerminalWidget;
 
-const COLS: usize = 80;
-const ROWS: usize = 24;
-
 pub struct App {
-    pub emulator: TerminalEmulator,
-    pub pty: PtyHandle,
-    pub pty_rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
+    pub db: Db,
+    pub pool: AgentPool,
+    pub projects: Vec<Project>,
+    pub templates: Vec<AgentTemplate>,
+    pub sidebar_expanded_project: Option<String>,
+    pub terminal_cols: u16,
+    pub terminal_rows: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -22,21 +24,26 @@ pub enum Message {
     CopyToClipboard(String),
     PasteFromClipboard,
     PasteText(String),
+    PickDirectory,
+    DirectoryPicked(Option<PathBuf>),
+    ToggleTemplateMenu(String),
+    SpawnAgent { project_id: String, template_id: String },
+    FocusAgent(String),
 }
 
 impl App {
     pub fn new() -> (Self, Task<Message>) {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        #[cfg(windows)]
-        let default_cmd = "cmd.exe".to_string();
-        #[cfg(not(windows))]
-        let default_cmd = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-
-        let (pty, rx) = spawn_pty(COLS as u16, ROWS as u16, &cwd, &default_cmd, &[]);
+        let db = Db::open().expect("failed to open database");
+        let projects = db.list_projects();
+        let templates = db.list_templates();
         let app = App {
-            emulator: TerminalEmulator::new(COLS, ROWS),
-            pty,
-            pty_rx: Arc::new(Mutex::new(rx)),
+            db,
+            pool: AgentPool::new(),
+            projects,
+            templates,
+            sidebar_expanded_project: None,
+            terminal_cols: 80,
+            terminal_rows: 24,
         };
         (app, Task::none())
     }
@@ -44,21 +51,23 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::PtyTick => {
-                while let Ok(bytes) = self.pty_rx.lock().unwrap().try_recv() {
-                    self.emulator.process(&bytes);
-                }
+                self.pool.tick_all();
             }
             Message::KeyInput(bytes) => {
-                let _ = self.pty.write_bytes(&bytes);
+                if let Some(agent) = self.pool.focused_mut() {
+                    let _ = agent.pty.write_bytes(&bytes);
+                }
             }
             Message::WindowResized(width, height) => {
-                let char_w = TerminalWidget::CHAR_WIDTH;
-                let char_h = TerminalWidget::CHAR_HEIGHT;
-                let cols = (width as f32 / char_w).floor() as usize;
-                let rows = (height as f32 / char_h).floor() as usize;
+                let cw = TerminalWidget::CHAR_WIDTH;
+                let ch = TerminalWidget::CHAR_HEIGHT;
+                let workspace_w = (width as f32 - 250.0).max(0.0);
+                let cols = (workspace_w / cw).floor() as u16;
+                let rows = (height as f32 / ch).floor() as u16;
                 if cols > 0 && rows > 0 {
-                    self.emulator.resize(cols, rows);
-                    self.pty.resize(cols as u16, rows as u16);
+                    self.terminal_cols = cols;
+                    self.terminal_rows = rows;
+                    self.pool.resize_all(cols, rows);
                 }
             }
             Message::CopyToClipboard(text) => {
@@ -66,22 +75,69 @@ impl App {
             }
             Message::PasteFromClipboard => {
                 return iced::clipboard::read()
-                    .map(|opt| {
-                        Message::PasteText(opt.unwrap_or_default())
-                    });
+                    .map(|opt| Message::PasteText(opt.unwrap_or_default()));
             }
             Message::PasteText(text) => {
-                let _ = self.pty.write_bytes(text.as_bytes());
+                if let Some(agent) = self.pool.focused_mut() {
+                    let _ = agent.pty.write_bytes(text.as_bytes());
+                }
+            }
+            Message::PickDirectory => {
+                return Task::future(async {
+                    let folder = rfd::AsyncFileDialog::new().pick_folder().await;
+                    Message::DirectoryPicked(folder.map(|f| f.path().to_path_buf()))
+                });
+            }
+            Message::DirectoryPicked(Some(path)) => {
+                let name = path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+                let project = self.db.insert_project(&path, &name);
+                if !self.projects.iter().any(|p| p.id == project.id) {
+                    self.projects.push(project);
+                }
+            }
+            Message::DirectoryPicked(None) => {}
+            Message::ToggleTemplateMenu(project_id) => {
+                if self.sidebar_expanded_project.as_deref() == Some(&project_id) {
+                    self.sidebar_expanded_project = None;
+                } else {
+                    self.sidebar_expanded_project = Some(project_id);
+                }
+            }
+            Message::SpawnAgent { project_id, template_id } => {
+                if let (Some(project), Some(template)) = (
+                    self.projects.iter().find(|p| p.id == project_id).cloned(),
+                    self.templates.iter().find(|t| t.id == template_id).cloned(),
+                ) {
+                    self.db.insert_instance(&project_id, &template_id);
+                    self.pool.spawn(&project, &template, self.terminal_cols, self.terminal_rows);
+                    self.sidebar_expanded_project = None;
+                }
+            }
+            Message::FocusAgent(agent_id) => {
+                self.pool.focus(&agent_id);
             }
         }
         Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        TerminalWidget::new(&self.emulator.screen).into()
+        // Sidebar is wired in Task 6 after sidebar.rs is created
+        match self.pool.focused() {
+            Some(agent) => TerminalWidget::new(&agent.emulator.screen).into(),
+            None => container(iced::widget::text("Sélectionne un agent").size(14))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .into(),
+        }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
+        use std::time::Duration;
+
         let poll = iced::time::every(Duration::from_millis(8))
             .map(|_| Message::PtyTick);
 
