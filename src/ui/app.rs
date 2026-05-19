@@ -26,7 +26,13 @@ pub enum Message {
 
 impl App {
     pub fn new() -> (Self, Task<Message>) {
-        let (pty, rx) = spawn_pty(COLS as u16, ROWS as u16);
+        let cwd = std::env::current_dir().unwrap_or_default();
+        #[cfg(windows)]
+        let default_cmd = "cmd.exe".to_string();
+        #[cfg(not(windows))]
+        let default_cmd = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+
+        let (pty, rx) = spawn_pty(COLS as u16, ROWS as u16, &cwd, &default_cmd, &[]);
         let app = App {
             emulator: TerminalEmulator::new(COLS, ROWS),
             pty,
