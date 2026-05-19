@@ -1,5 +1,6 @@
 mod terminal;
 mod db;
+mod agents;
 mod ui;
 
 use ui::app::App;
